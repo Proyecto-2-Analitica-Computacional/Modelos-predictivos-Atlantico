@@ -1,4 +1,5 @@
 
+
 import os
 import re
 import unicodedata
@@ -14,11 +15,11 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 
-DATA_PATH = os.environ.get(
-    "DATA_PATH",
-    r"C:\Users\Sofia Toro\Documents\GitHub\Modelos-predictivos-Atlantico\Tarea 2 - Limpieza_Datos\saber11_limpio.csv",
-)
-MODELS_DIR = os.environ.get("MODELS_DIR", "models")
+
+# Ruta robusta: siempre busca los archivos desde la raíz del proyecto
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_PATH = os.path.join(PROJECT_ROOT, "Tarea 2 - Limpieza_Datos", "saber11_limpio.csv")
+MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
 os.makedirs(MODELS_DIR, exist_ok=True)
 
 RANDOM_STATE = 42
@@ -41,6 +42,25 @@ variables_general_categoricas = [
     "fami_tieneinternet", "fami_tienecomputador", "fami_educacionmadre",
     "fami_educacionpadre", "fami_estratovivienda", "fami_tieneautomovil"
 ]
+
+def preprocess_cole_columns(df):
+    data = df.copy()
+    # Normalizar y limpiar variables de colegio
+    if "cole_naturaleza" in data.columns:
+        data["cole_naturaleza"] = clean_text_series(data["cole_naturaleza"]).astype("category")
+    if "cole_bilingue" in data.columns:
+        data["cole_bilingue"] = data["cole_bilingue"].apply(normalizar_si_no).astype("category")
+    if "cole_jornada" in data.columns:
+        data["cole_jornada"] = clean_text_series(data["cole_jornada"]).astype("category")
+    if "cole_calendario" in data.columns:
+        data["cole_calendario"] = clean_text_series(data["cole_calendario"]).astype("category")
+    if "cole_area_ubicacion" in data.columns:
+        data["cole_area_ubicacion"] = clean_text_series(data["cole_area_ubicacion"]).astype("category")
+    if "cole_caracter" in data.columns:
+        data["cole_caracter"] = clean_text_series(data["cole_caracter"]).astype("category")
+    if "cole_genero" in data.columns:
+        data["cole_genero"] = clean_text_series(data["cole_genero"]).astype("category")
+    return data
 
 def clean_columns(df):
     df.columns = (
@@ -254,10 +274,9 @@ def build_regressor(input_dim, n1=32, n2=16):
     return model
 
 def build_general_regressor(X_train_np):
-    normalizer = layers.Normalization()
-    normalizer.adapt(X_train_np)
+    input_dim = X_train_np.shape[1]
     model = keras.Sequential([
-        normalizer,
+        layers.Input(shape=(input_dim,)),
         layers.Dense(64, activation="relu"),
         layers.Dense(32, activation="relu"),
         layers.Dense(1)
@@ -285,40 +304,148 @@ def train_familiar(df):
 
     prob = model.predict(X_test, verbose=0).ravel()
     pred = (prob >= .5).astype(int)
-    print("Accuracy:", accuracy_score(y_test, pred))
-    print("Precision:", precision_score(y_test, pred, zero_division=0))
-    print("Recall:", recall_score(y_test, pred, zero_division=0))
-    print("F1:", f1_score(y_test, pred, zero_division=0))
-    print("ROC-AUC:", roc_auc_score(y_test, prob))
+    acc = accuracy_score(y_test, pred)
+    prec = precision_score(y_test, pred, zero_division=0)
+    rec = recall_score(y_test, pred, zero_division=0)
+    f1 = f1_score(y_test, pred, zero_division=0)
+    auc = roc_auc_score(y_test, prob)
+    print("Accuracy:", acc)
+    print("Precision:", prec)
+    print("Recall:", rec)
+    print("F1:", f1)
+    print("ROC-AUC:", auc)
 
-    model.save(os.path.join(MODELS_DIR, "modelo_familiar_alto_desempeno.keras"))
+    # Guardar métricas
+    metrics = {
+        "AUC": round(float(auc), 4),
+        "Accuracy": round(float(acc), 4),
+        "Precision": round(float(prec), 4),
+        "Recall": round(float(rec), 4),
+        "F1": round(float(f1), 4)
+    }
+    with open(os.path.join(MODELS_DIR, "metrics_familiar.json"), "w", encoding="utf-8") as f:
+        import json
+        json.dump(metrics, f, ensure_ascii=False, indent=2)
+
+    model.save(os.path.join(MODELS_DIR, "modelo_familiar_alto_desempeno.h5"))
     joblib.dump(encoded_cols, os.path.join(MODELS_DIR, "columnas_familiares_encoded.pkl"))
 
 def train_cole(df):
-    print("\nEntrenando modelo colegio...")
-    data = df.copy()
+    print("\nEntrenando modelo colegio")
+    data = preprocess_cole_columns(df)
     data["punt_global"] = pd.to_numeric(data["punt_global"], errors="coerce")
     data = data.dropna(subset=["punt_global"])
+    data["alto_desempeno"] = (data["punt_global"] >= 300).astype(int)
 
+
+
+    # One-hot encoding sobre las variables de colegio (igual que familia)
     data, encoded_cols = one_hot(data, variables_cole)
-    X = data[encoded_cols].apply(pd.to_numeric, errors="coerce").fillna(0).astype("float32")
-    y = pd.to_numeric(data["punt_global"], errors="coerce").astype("float32")
+    X = data[encoded_cols].astype(int)
+    y = data['alto_desempeno']
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=.2, random_state=42)
+    # Guardar columnas para Dash
+    joblib.dump(encoded_cols, os.path.join(MODELS_DIR, "columnas_cole_encoded.pkl"))
+
+    # Split
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=y
+    )
+
+    # Escalado y guardado
     scaler = StandardScaler()
-    X_train_s = scaler.fit_transform(X_train)
-    X_test_s = scaler.transform(X_test)
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+    joblib.dump(scaler, os.path.join(MODELS_DIR, "scaler_cole.pkl"))
 
-    model = build_regressor(X_train_s.shape[1], 32, 16)
-    early = keras.callbacks.EarlyStopping(monitor="val_loss", patience=5, restore_best_weights=True)
-    model.fit(X_train_s, y_train, validation_split=.2, epochs=40, batch_size=64, callbacks=[early], verbose=1)
+    # Hiperparámetros óptimos del notebook
+    params = {
+        'capa_1': 96,
+        'capa_2': 48,
+        'capa_3': 24,
+        'dropout_1': 0.15,
+        'dropout_2': 0.05,
+        'dropout_3': 0.03,
+        'learning_rate': 0.001,
+        'batch_size': 128,
+        'epochs': 30,  # Más epochs para mejor entrenamiento
+        'class_weight_1': 1.5,
+        'umbral': 0.35
+    }
 
-    pred = model.predict(X_test_s, verbose=0).ravel()
-    print("RMSE:", np.sqrt(mean_squared_error(y_test, pred)))
-    print("MAE:", mean_absolute_error(y_test, pred))
-    print("R2:", r2_score(y_test, pred))
+    def construir_modelo(input_dim, capa_1, capa_2, capa_3, dropout_1, dropout_2, dropout_3, learning_rate):
+        model = keras.Sequential([
+            layers.Input(shape=(input_dim,)),
+            layers.BatchNormalization(),
+            layers.Dense(capa_1, activation=keras.layers.LeakyReLU(alpha=0.1)),
+            layers.Dropout(dropout_1),
+            layers.Dense(capa_2, activation=keras.layers.LeakyReLU(alpha=0.1)),
+            layers.BatchNormalization(),
+            layers.Dropout(dropout_2),
+            layers.Dense(capa_3, activation=keras.layers.LeakyReLU(alpha=0.1)),
+            layers.Dropout(dropout_3),
+            layers.Dense(1, activation="sigmoid")
+        ])
+        model.compile(
+            optimizer=keras.optimizers.Adam(learning_rate=learning_rate),
+            loss="binary_crossentropy",
+            metrics=["accuracy", keras.metrics.AUC(name="auc")]
+        )
+        return model
 
-    model.save(os.path.join(MODELS_DIR, "modelo_cole_regresion.keras"))
+    model = construir_modelo(
+        input_dim=X_train_scaled.shape[1],
+        capa_1=params['capa_1'],
+        capa_2=params['capa_2'],
+        capa_3=params['capa_3'],
+        dropout_1=params['dropout_1'],
+        dropout_2=params['dropout_2'],
+        dropout_3=params['dropout_3'],
+        learning_rate=params['learning_rate']
+    )
+
+    early_stop = keras.callbacks.EarlyStopping(monitor="val_loss", patience=4, restore_best_weights=True, verbose=0)
+    class_weight = {0: 1.0, 1: params['class_weight_1']}
+
+    # Entrenamiento
+    model.fit(
+        X_train_scaled, y_train,
+        validation_split=0.2,
+        epochs=params['epochs'],
+        batch_size=params['batch_size'],
+        class_weight=class_weight,
+        callbacks=[early_stop],
+        verbose=1
+    )
+
+    # Evaluación
+    prob = model.predict(X_test_scaled, verbose=0).ravel()
+    pred = (prob >= params['umbral']).astype(int)
+    acc = accuracy_score(y_test, pred)
+    prec = precision_score(y_test, pred, zero_division=0)
+    rec = recall_score(y_test, pred, zero_division=0)
+    f1 = f1_score(y_test, pred, zero_division=0)
+    auc = roc_auc_score(y_test, prob)
+    print("Accuracy:", acc)
+    print("Precision:", prec)
+    print("Recall:", rec)
+    print("F1:", f1)
+    print("ROC-AUC:", auc)
+
+    # Guardar métricas
+    metrics = {
+        "AUC": round(float(auc), 4),
+        "Accuracy": round(float(acc), 4),
+        "Precision": round(float(prec), 4),
+        "Recall": round(float(rec), 4),
+        "F1": round(float(f1), 4)
+    }
+    with open(os.path.join(MODELS_DIR, "metrics_colegio.json"), "w", encoding="utf-8") as f:
+        import json
+        json.dump(metrics, f, ensure_ascii=False, indent=2)
+
+    # Guardar modelo, columnas y scaler
+    model.save(os.path.join(MODELS_DIR, "modelo_cole_clasificacion.h5"))
     joblib.dump(encoded_cols, os.path.join(MODELS_DIR, "columnas_cole_encoded.pkl"))
     joblib.dump(scaler, os.path.join(MODELS_DIR, "scaler_cole.pkl"))
 
@@ -365,11 +492,23 @@ def train_general(df):
     print("MAE:", mean_absolute_error(y_test, pred))
     print("R2:", r2_score(y_test, pred))
 
-    model.save(os.path.join(MODELS_DIR, "modelo_general_regresion.keras"))
+    # Guardar el modelo en formato .h5 para máxima compatibilidad
+    model.save(os.path.join(MODELS_DIR, "modelo_general_regresion.h5"))
+    # Si quieres, puedes eliminar el .keras para evitar confusiones
+    keras_path = os.path.join(MODELS_DIR, "modelo_general_regresion.keras")
+    if os.path.exists(keras_path):
+        try:
+            os.remove(keras_path)
+        except Exception as e:
+            print(f"[DEBUG] No se pudo eliminar el archivo .keras: {e}")
     joblib.dump(encoded_cols, os.path.join(MODELS_DIR, "columnas_general_encoded.pkl"))
 
 if __name__ == "__main__":
-    df = pd.read_csv(r"C:\Users\Sofia Toro\Documents\GitHub\Modelos-predictivos-Atlantico\Tarea 2 - Limpieza_Datos\saber11_limpio.csv")
+    import os
+    # Ruta robusta: siempre busca el archivo desde la raíz del proyecto
+    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    DATA_PATH = os.path.join(PROJECT_ROOT, "Tarea 2 - Limpieza_Datos", "saber11_limpio.csv")
+    df = pd.read_csv(DATA_PATH)
     df = clean_columns(df)
     train_familiar(df)
     train_cole(df)

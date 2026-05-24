@@ -1,5 +1,27 @@
-
 import os
+import json
+
+# --- MÉTRICAS: funciones para cargar métricas de cada modelo ---
+def get_metrics_general():
+    metrics_path = os.path.join(MODELS_DIR, "metrics_general.json")
+    if os.path.exists(metrics_path):
+        with open(metrics_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {"RMSE": "-", "MAE": "-", "R2": "-"}
+
+def get_metrics_familiar():
+    metrics_path = os.path.join(MODELS_DIR, "metrics_familiar.json")
+    if os.path.exists(metrics_path):
+        with open(metrics_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {"AUC": "-", "Accuracy": "-", "Precision": "-", "Recall": "-", "F1": "-"}
+
+def get_metrics_colegio():
+    metrics_path = os.path.join(MODELS_DIR, "metrics_colegio.json")
+    if os.path.exists(metrics_path):
+        with open(metrics_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {"AUC": "-", "Accuracy": "-", "Precision": "-", "Recall": "-", "F1": "-"}
 import joblib
 import numpy as np
 import pandas as pd
@@ -8,6 +30,7 @@ from dash import dcc, html
 from dash.dependencies import Input, Output, State
 import plotly.graph_objects as go
 import plotly.express as px
+import json
 import importlib
 
 try:
@@ -17,7 +40,17 @@ except Exception:
 import re
 import unicodedata
 
-# -------------------------
+import joblib
+import numpy as np
+import pandas as pd
+import dash
+from dash import dcc, html
+from dash.dependencies import Input, Output, State
+import plotly.graph_objects as go
+import plotly.express as px
+import json
+import importlib
+
 # CONFIGURACION
 # -------------------------
 
@@ -25,11 +58,11 @@ external_stylesheets = ["https://codepen.io/chriddyp/pen/bWLwgP.css"]
 app = dash.Dash(__name__, external_stylesheets=external_stylesheets, suppress_callback_exceptions=True)
 server = app.server
 
-DATA_PATH = os.environ.get(
-    "DATA_PATH",
-    r"C:\\Users\\Sofia Toro\\Documents\\GitHub\\Modelos-predictivos-Atlantico\\Tarea 2 - Limpieza_Datos\\saber11_limpio.csv",
-)
-MODELS_DIR = os.environ.get("MODELS_DIR", "models")
+import os
+# Ruta robusta: siempre busca el archivo desde la raíz del proyecto
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_PATH = os.path.join(PROJECT_ROOT, "Tarea 2 - Limpieza_Datos", "saber11_limpio.csv")
+MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
 
 # -------------------------
 # VARIABLES
@@ -85,6 +118,50 @@ def load_data():
         return df
     return pd.DataFrame()
 
+# Mover la función radar_metrics_figure fuera de load_data
+def auc_r2_bar_figure():
+    fam = get_metrics_familiar()
+    col = get_metrics_colegio()
+    gen = get_metrics_general()
+    auc_fam = float(fam.get("AUC", 0) or 0)
+    auc_col = float(col.get("AUC", 0) or 0)
+    r2_gen = float(gen.get("R2", 0) or 0)
+    modelos = ["Familiar", "Colegio", "General"]
+    valores = [auc_fam, auc_col, r2_gen]
+    fig = go.Figure([go.Bar(x=modelos, y=valores, marker_color=["#6C63FF", "#00BFAE", "#888888"])] )
+    fig.update_layout(title="AUC ROC (clasificación) y R² (regresión)", yaxis_title="AUC ROC / R²", xaxis_title="Modelo", height=350, margin=dict(l=30, r=30, t=50, b=30))
+    return fig
+
+def rmse_bar_figure():
+    gen = get_metrics_general()
+    rmse_gen = float(gen.get("RMSE", 0) or 0)
+    modelos = ["General"]
+    valores = [rmse_gen]
+    fig = go.Figure([go.Bar(x=modelos, y=valores, marker_color=["#888888"])] )
+    fig.update_layout(title="RMSE por modelo (regresión)", yaxis_title="RMSE", xaxis_title="Modelo", height=350, margin=dict(l=30, r=30, t=50, b=30))
+    return fig
+
+def radar_metrics_figure():
+    metrics_fam = get_metrics_familiar()
+    metrics_col = get_metrics_colegio()
+    categories = ["Precision", "Recall", "F1"]
+    fam_values = [float(metrics_fam.get(cat, 0) or 0) for cat in categories]
+    col_values = [float(metrics_col.get(cat, 0) or 0) for cat in categories]
+    # Cerrar el polígono
+    fam_values += [fam_values[0]]
+    col_values += [col_values[0]]
+    cats = categories + [categories[0]]
+    fig = go.Figure()
+    fig.add_trace(go.Scatterpolar(r=fam_values, theta=cats, fill='toself', name='Familiar', line_color='#6C63FF'))
+    fig.add_trace(go.Scatterpolar(r=col_values, theta=cats, fill='toself', name='Colegio', line_color='#00BFAE'))
+    fig.update_layout(
+        polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
+        showlegend=True,
+        title="Precisión, Recall y F1 (modelos de clasificación)",
+        margin=dict(l=30, r=30, t=50, b=30)
+    )
+    return fig
+
 df = load_data()
 
 def clean_text_series(s):
@@ -101,8 +178,6 @@ def quitar_tildes(texto):
     texto = unicodedata.normalize("NFKD", str(texto))
     texto = "".join(c for c in texto if not unicodedata.combining(c))
     return texto
-
-
 def texto_base(valor):
     if pd.isna(valor):
         return "sin_informacion"
@@ -398,7 +473,12 @@ def default_for(col, default_value=None):
 def load_keras_model(path):
     if tf is None or not os.path.exists(path):
         return None
-    return tf.keras.models.load_model(path)
+    try:
+        # compile=False evita errores de deserialización de métricas
+        return tf.keras.models.load_model(path, custom_objects={"LeakyReLU": tf.keras.layers.LeakyReLU}, compile=False)
+    except Exception as e:
+        print(f"Error cargando modelo {path}: {e}")
+        return None
 
 def load_joblib(path):
     if not os.path.exists(path):
@@ -422,15 +502,33 @@ def align_to_model_input(matrix, model):
 
     return matrix[:, :expected]
 
-modelo_familiar = load_keras_model(os.path.join(MODELS_DIR, "modelo_familiar_alto_desempeno.keras"))
+modelo_familiar = load_keras_model(os.path.join(MODELS_DIR, "modelo_familiar_alto_desempeno.h5"))
 cols_familiar = load_joblib(os.path.join(MODELS_DIR, "columnas_familiares_encoded.pkl"))
 
-modelo_cole = load_keras_model(os.path.join(MODELS_DIR, "modelo_cole_regresion.keras"))
+modelo_cole = load_keras_model(os.path.join(MODELS_DIR, "modelo_cole_clasificacion.h5"))
 cols_cole = load_joblib(os.path.join(MODELS_DIR, "columnas_cole_encoded.pkl"))
 scaler_cole = load_joblib(os.path.join(MODELS_DIR, "scaler_cole.pkl"))
 
-modelo_general = load_keras_model(os.path.join(MODELS_DIR, "modelo_general_regresion.keras"))
+
+modelo_general = load_keras_model(os.path.join(MODELS_DIR, "modelo_general_regresion.h5"))
 cols_general = load_joblib(os.path.join(MODELS_DIR, "columnas_general_encoded.pkl"))
+print("[DEBUG] Columnas del modelo general al cargar:", len(cols_general) if cols_general is not None else None, cols_general)
+if modelo_general is not None:
+    try:
+        print("[DEBUG] Modelo general input_shape:", modelo_general.input_shape)
+    except Exception as e:
+        print("[DEBUG] Error obteniendo input_shape del modelo general:", e)
+
+# --- DEBUG: Verifica existencia de modelo general y columnas al iniciar el servidor ---
+if modelo_general is None:
+    print("[DEBUG] No se pudo cargar el modelo general de regresión (modelo_general_regresion.h5)")
+else:
+    print("[DEBUG] Modelo general de regresión cargado correctamente")
+if cols_general is None:
+    print("[DEBUG] No se pudo cargar las columnas del modelo general (columnas_general_encoded.pkl)")
+else:
+    print("[DEBUG] Columnas del modelo general cargadas correctamente")
+# --- FIN DEBUG ---
 
 def make_family_vector(values):
     row = pd.DataFrame([values])
@@ -456,7 +554,8 @@ def make_cole_vector(values):
     encoded = pd.get_dummies(row, columns=variables_cole, drop_first=False)
     encoded = encoded.reindex(columns=cols_cole, fill_value=0).astype(int)
     if scaler_cole is not None:
-        return scaler_cole.transform(encoded)
+        X_scaled = scaler_cole.transform(encoded)
+        return X_scaled
     return encoded
 
 def make_general_vector(values):
@@ -495,6 +594,7 @@ def gauge_score(score, title):
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
         value=score,
+        number={"valueformat": ".1f", "font": {"size": 48}},
         title={"text": title},
         gauge={
             "axis": {"range": [0, 500]},
@@ -531,146 +631,16 @@ def warning_missing(model_name):
         )
     ], style={"color": "#C92A2A"})
 
+metrics_general = get_metrics_general()
+metrics_familiar = get_metrics_familiar()
+metrics_colegio = get_metrics_colegio()
+
 # -------------------------
-# LAYOUT
-# -------------------------
-
-app.layout = html.Div([
-    html.H2("Dashboard Predictivo Saber 11 - Atlántico"),
-    html.P("Producto analítico para la Secretaría de Educación del Atlántico."),
-
-    dcc.Tabs(id="tabs", value="tab-familiar", children=[
-
-        dcc.Tab(label="Modelo Familiar", value="tab-familiar", children=[
-            html.Br(),
-            card([
-                html.H3("1. Predicción de alto desempeño según condiciones familiares"),
-                html.P("Este modelo estima la probabilidad de que un estudiante obtenga puntaje global alto, usando variables familiares y socioeconómicas."),
-
-                html.Div([
-                    html.Div([
-                        html.Label("Estrato de vivienda"),
-                        dcc.Dropdown(id="fam_estrato", options=options_for("fami_estratovivienda"), value=default_for("fami_estratovivienda"), clearable=False),
-                        html.Label("Educación madre"),
-                        dcc.Dropdown(id="fam_edu_madre", options=options_for("fami_educacionmadre"), value=default_for("fami_educacionmadre"), clearable=False),
-                        html.Label("Educación padre"),
-                        dcc.Dropdown(id="fam_edu_padre", options=options_for("fami_educacionpadre"), value=default_for("fami_educacionpadre"), clearable=False),
-                    ], style={"width": "48%", "display": "inline-block", "verticalAlign": "top"}),
-
-                    html.Div([
-                        html.Label("Personas en el hogar"),
-                        dcc.Dropdown(id="fam_personas", options=options_for("fami_personashogar"), value=default_for("fami_personashogar"), clearable=False),
-                        html.Label("Cuartos del hogar"),
-                        dcc.Dropdown(id="fam_cuartos", options=options_for("fami_cuartoshogar"), value=default_for("fami_cuartoshogar"), clearable=False),
-                        html.Label("Tiene automóvil"),
-                        dcc.Dropdown(id="fam_auto", options=options_for("fami_tieneautomovil"), value=default_for("fami_tieneautomovil"), clearable=False),
-                        html.Label("Tiene lavadora"),
-                        dcc.Dropdown(id="fam_lavadora", options=options_for("fami_tienelavadora"), value=default_for("fami_tienelavadora"), clearable=False),
-                    ], style={"width": "48%", "display": "inline-block", "marginLeft": "4%", "verticalAlign": "top"}),
-                ]),
-
-                html.Br(),
-                html.Button("Calcular predicción familiar", id="btn-familiar", n_clicks=0),
-                dcc.Loading(type="circle", children=html.Div(id="resultado-familiar")),
-            ])
-        ]),
-
-        dcc.Tab(label="Modelo Colegio", value="tab-colegio", children=[
-            html.Br(),
-            card([
-                html.H3("2. Predicción del puntaje global según características del colegio"),
-                html.P("Este modelo de regresión estima el puntaje global a partir de variables institucionales."),
-
-                html.Div([
-                    html.Div([
-                        html.Label("Naturaleza"),
-                        dcc.Dropdown(id="cole_naturaleza", options=options_for("cole_naturaleza"), value=default_for("cole_naturaleza"), clearable=False),
-                        html.Label("Bilingüe"),
-                        dcc.Dropdown(id="cole_bilingue", options=options_for("cole_bilingue"), value=default_for("cole_bilingue"), clearable=False),
-                        html.Label("Jornada"),
-                        dcc.Dropdown(id="cole_jornada", options=options_for("cole_jornada"), value=default_for("cole_jornada"), clearable=False),
-                        html.Label("Calendario"),
-                        dcc.Dropdown(id="cole_calendario", options=options_for("cole_calendario"), value=default_for("cole_calendario"), clearable=False),
-                    ], style={"width": "48%", "display": "inline-block", "verticalAlign": "top"}),
-
-                    html.Div([
-                        html.Label("Área de ubicación"),
-                        dcc.Dropdown(id="cole_area", options=options_for("cole_area_ubicacion"), value=default_for("cole_area_ubicacion"), clearable=False),
-                        html.Label("Carácter"),
-                        dcc.Dropdown(id="cole_caracter", options=options_for("cole_caracter"), value=default_for("cole_caracter"), clearable=False),
-                        html.Label("Género del colegio"),
-                        dcc.Dropdown(id="cole_genero", options=options_for("cole_genero"), value=default_for("cole_genero"), clearable=False),
-                    ], style={"width": "48%", "display": "inline-block", "marginLeft": "4%", "verticalAlign": "top"}),
-                ]),
-
-                html.Br(),
-                html.Button("Calcular puntaje estimado colegio", id="btn-colegio", n_clicks=0),
-                dcc.Loading(type="circle", children=html.Div(id="resultado-colegio")),
-            ])
-        ]),
-
-        dcc.Tab(label="Modelo General", value="tab-general", children=[
-            html.Br(),
-            card([
-                html.H3("3. Predicción del puntaje global con variables generales"),
-                html.P("Este modelo estima el puntaje global usando edad, recursos tecnológicos, variables familiares y algunas características institucionales."),
-
-                html.Div([
-                    html.Div([
-                        html.Label("Edad de presentación"),
-                        dcc.Input(id="gen_edad", type="number", value=17, min=13, max=60, step=1, style={"width": "100%"}),
-                        html.Label("Jornada"),
-                        dcc.Dropdown(id="gen_jornada", options=options_for("cole_jornada"), value=default_for("cole_jornada"), clearable=False),
-                        html.Label("Calendario"),
-                        dcc.Dropdown(id="gen_calendario", options=options_for("cole_calendario"), value=default_for("cole_calendario"), clearable=False),
-                        html.Label("Bilingüe"),
-                        dcc.Dropdown(id="gen_bilingue", options=options_for("cole_bilingue"), value=default_for("cole_bilingue"), clearable=False),
-                        html.Label("Naturaleza"),
-                        dcc.Dropdown(id="gen_naturaleza", options=options_for("cole_naturaleza"), value=default_for("cole_naturaleza"), clearable=False),
-                    ], style={"width": "48%", "display": "inline-block", "verticalAlign": "top"}),
-
-                    html.Div([
-                        html.Label("Internet"),
-                        dcc.Dropdown(id="gen_internet", options=options_for("fami_tieneinternet"), value=default_for("fami_tieneinternet"), clearable=False),
-                        html.Label("Computador"),
-                        dcc.Dropdown(id="gen_computador", options=options_for("fami_tienecomputador"), value=default_for("fami_tienecomputador"), clearable=False),
-                        html.Label("Educación madre"),
-                        dcc.Dropdown(id="gen_madre", options=options_for("fami_educacionmadre"), value=default_for("fami_educacionmadre"), clearable=False),
-                        html.Label("Educación padre"),
-                        dcc.Dropdown(id="gen_padre", options=options_for("fami_educacionpadre"), value=default_for("fami_educacionpadre"), clearable=False),
-                        html.Label("Estrato"),
-                        dcc.Dropdown(id="gen_estrato", options=options_for("fami_estratovivienda"), value=default_for("fami_estratovivienda"), clearable=False),
-                        html.Label("Automóvil"),
-                        dcc.Dropdown(id="gen_auto", options=options_for("fami_tieneautomovil"), value=default_for("fami_tieneautomovil"), clearable=False),
-                    ], style={"width": "48%", "display": "inline-block", "marginLeft": "4%", "verticalAlign": "top"}),
-                ]),
-
-                html.Br(),
-                html.Button("Calcular puntaje estimado general", id="btn-general", n_clicks=0),
-                dcc.Loading(type="circle", children=html.Div(id="resultado-general")),
-            ])
-        ]),
-
-        dcc.Tab(label="Resumen", value="tab-resumen", children=[
-            html.Br(),
-            card([
-                html.H3("Resumen del producto"),
-                html.P("El tablero integra tres modelos predictivos para apoyar el análisis del desempeño en Saber 11 en el Atlántico."),
-                html.Ul([
-                    html.Li("Modelo Familiar: clasificación de alto desempeño."),
-                    html.Li("Modelo Colegio: regresión del puntaje global con variables institucionales."),
-                    html.Li("Modelo General: regresión del puntaje global con variables mixtas."),
-                ]),
-                html.P("Los modelos deben estar guardados en la carpeta models. Si no existen, ejecuta train_all_models.py.")
-            ])
-        ]),
-        
-    ])
-], style={"padding": "25px"})
 
 # -------------------------
 # CALLBACKS
 # -------------------------
+from dash import callback
 
 @app.callback(
     Output("resultado-familiar", "children"),
@@ -684,7 +654,7 @@ app.layout = html.Div([
     State("fam_lavadora", "value"),
 )
 def predict_familiar(n, estrato, madre, padre, personas, cuartos, auto, lavadora):
-    if n == 0:
+    if not n:
         return ""
     if modelo_familiar is None or cols_familiar is None:
         return warning_missing("modelo familiar")
@@ -697,18 +667,18 @@ def predict_familiar(n, estrato, madre, padre, personas, cuartos, auto, lavadora
         "fami_tieneautomovil": auto,
         "fami_tienelavadora": lavadora,
     }
-    X = make_family_vector(values)
-    prob = float(modelo_familiar.predict(X, verbose=0).ravel()[0])
-    clasificacion = "Alto desempeño" if prob >= 0.5 else "No alto desempeño"
-
-    return html.Div([
-        dcc.Graph(figure=gauge_probability(prob)),
-        html.H4(f"Clasificación estimada: {clasificacion}"),
-        html.P(f"Probabilidad estimada de alto desempeño: {prob*100:.1f}%"),
-        html.P("Interpretación: el resultado se basa únicamente en condiciones familiares, por lo que debe usarse como apoyo analítico y no como decisión definitiva.")
-    ], style={"marginTop": "25px"})
-
-
+    try:
+        X = make_family_vector(values)
+        prob = float(modelo_familiar.predict(X, verbose=0).ravel()[0])
+        clasificacion = "Alto desempeño" if prob >= 0.5 else "No alto desempeño"
+        return html.Div([
+            dcc.Graph(figure=gauge_probability(prob)),
+            html.H4(f"Clasificación estimada: {clasificacion}"),
+            html.P(f"Probabilidad estimada de alto desempeño: {prob*100:.1f}%"),
+            html.P("Interpretación: el resultado se basa únicamente en condiciones familiares, por lo que debe usarse como apoyo analítico y no como decisión definitiva."),
+        ], style={"marginTop": "25px"})
+    except Exception as e:
+        return html.Div(["Error en la predicción familiar: ", str(e)], style={"color": "#C92A2A"})
 
 @app.callback(
     Output("resultado-colegio", "children"),
@@ -722,7 +692,7 @@ def predict_familiar(n, estrato, madre, padre, personas, cuartos, auto, lavadora
     State("cole_genero", "value"),
 )
 def predict_colegio(n, naturaleza, bilingue, jornada, calendario, area, caracter, genero):
-    if n == 0:
+    if not n:
         return ""
     if modelo_cole is None or cols_cole is None:
         return warning_missing("modelo colegio")
@@ -735,15 +705,19 @@ def predict_colegio(n, naturaleza, bilingue, jornada, calendario, area, caracter
         "cole_caracter": caracter,
         "cole_genero": genero,
     }
-    X = make_cole_vector(values)
-    score = float(modelo_cole.predict(X, verbose=0).ravel()[0])
-    score = max(0, min(500, score))
-
-    return html.Div([
-        dcc.Graph(figure=gauge_score(score, "Puntaje global estimado")),
-        html.H4(f"Puntaje global estimado: {score:.1f}"),
-        html.P("Interpretación: este modelo estima el puntaje global con base en características institucionales del colegio.")
-    ], style={"marginTop": "25px"})
+    try:
+        X = make_cole_vector(values)
+        prob = float(modelo_cole.predict(X, verbose=0).ravel()[0])
+        prob = max(0, min(1, prob))
+        clasificacion = "Alto desempeño" if prob >= 0.5 else "No alto desempeño"
+        return html.Div([
+            dcc.Graph(figure=gauge_probability(prob)),
+            html.H4(f"Clasificación estimada: {clasificacion}"),
+            html.P(f"Probabilidad estimada de alto desempeño: {prob*100:.1f}%"),
+            html.P("Interpretación: este modelo estima la probabilidad de alto desempeño con base en características institucionales del colegio."),
+        ], style={"marginTop": "25px"})
+    except Exception as e:
+        return html.Div(["Error en la predicción colegio: ", str(e)], style={"color": "#C92A2A"})
 
 @app.callback(
     Output("resultado-general", "children"),
@@ -761,7 +735,7 @@ def predict_colegio(n, naturaleza, bilingue, jornada, calendario, area, caracter
     State("gen_auto", "value"),
 )
 def predict_general(n, edad, jornada, calendario, bilingue, naturaleza, internet, computador, madre, padre, estrato, auto):
-    if n == 0:
+    if not n:
         return ""
     if modelo_general is None or cols_general is None:
         return warning_missing("modelo general")
@@ -778,15 +752,178 @@ def predict_general(n, edad, jornada, calendario, bilingue, naturaleza, internet
         "fami_estratovivienda": estrato,
         "fami_tieneautomovil": auto,
     }
-    X = make_general_vector(values)
-    score = float(modelo_general.predict(X, verbose=0).ravel()[0])
-    score = max(0, min(500, score))
+    try:
+        X = make_general_vector(values)
+        score = float(modelo_general.predict(X, verbose=0).ravel()[0])
+        score = max(0, min(500, score))
+        return html.Div([
+            dcc.Graph(figure=gauge_score(score, "Puntaje global estimado")),
+            html.H4(f"Puntaje global estimado: {score:.1f}"),
+            html.P("Interpretación: este modelo estima el puntaje global usando variables mixtas (familiares, tecnológicas e institucionales)."),
+        ], style={"marginTop": "25px"})
+    except Exception as e:
+        return html.Div(["Error en la predicción general: ", str(e)], style={"color": "#C92A2A"})
 
-    return html.Div([
-        dcc.Graph(figure=gauge_score(score, "Puntaje global estimado")),
-        html.H4(f"Puntaje global estimado: {score:.1f}"),
-        html.P("Interpretación: este modelo combina edad, recursos tecnológicos, variables familiares e institucionales.")
-    ], style={"marginTop": "25px"})
+# -------------------------
+# LAYOUT
+# -------------------------
+
+app.layout = html.Div([
+    html.H2("Dashboard Predictivo Saber 11 - Atlántico"),
+    html.P("Producto analítico para la Secretaría de Educación del Atlántico."),
+    dcc.Tabs(id="tabs", value="tab-familiar", children=[
+        dcc.Tab(label="Modelo Familiar", value="tab-familiar", children=[
+            html.Br(),
+            card([
+                html.H3("1. Predicción de alto desempeño según condiciones familiares"),
+                html.P("Este modelo estima la probabilidad de que un estudiante obtenga puntaje global alto, usando variables familiares y socioeconómicas."),
+                html.Div([
+                    html.Div([
+                        html.Label("Estrato de vivienda"),
+                        dcc.Dropdown(id="fam_estrato", options=options_for("fami_estratovivienda"), value=default_for("fami_estratovivienda"), clearable=False),
+                        html.Label("Educación madre"),
+                        dcc.Dropdown(id="fam_edu_madre", options=options_for("fami_educacionmadre"), value=default_for("fami_educacionmadre"), clearable=False),
+                        html.Label("Educación padre"),
+                        dcc.Dropdown(id="fam_edu_padre", options=options_for("fami_educacionpadre"), value=default_for("fami_educacionpadre"), clearable=False),
+                    ], style={"width": "48%", "display": "inline-block", "verticalAlign": "top"}),
+                    html.Div([
+                        html.Label("Personas en el hogar"),
+                        dcc.Dropdown(id="fam_personas", options=options_for("fami_personashogar"), value=default_for("fami_personashogar"), clearable=False),
+                        html.Label("Cuartos del hogar"),
+                        dcc.Dropdown(id="fam_cuartos", options=options_for("fami_cuartoshogar"), value=default_for("fami_cuartoshogar"), clearable=False),
+                        html.Label("Tiene automóvil"),
+                        dcc.Dropdown(id="fam_auto", options=options_for("fami_tieneautomovil"), value=default_for("fami_tieneautomovil"), clearable=False),
+                        html.Label("Tiene lavadora"),
+                        dcc.Dropdown(id="fam_lavadora", options=options_for("fami_tienelavadora"), value=default_for("fami_tienelavadora"), clearable=False),
+                    ], style={"width": "48%", "display": "inline-block", "marginLeft": "4%", "verticalAlign": "top"}),
+                ]),
+                html.Br(),
+                html.Button("Calcular predicción familiar", id="btn-familiar", n_clicks=0),
+                dcc.Loading(type="circle", children=html.Div(id="resultado-familiar")),
+            ])
+        ]),
+        dcc.Tab(label="Modelo Colegio", value="tab-colegio", children=[
+            html.Br(),
+            card([
+                html.H3("2. Predicción del puntaje global según características del colegio"),
+                html.P("Este modelo de regresión estima el puntaje global a partir de variables institucionales."),
+                html.Div([
+                    html.Div([
+                        html.Label("Naturaleza"),
+                        dcc.Dropdown(id="cole_naturaleza", options=options_for("cole_naturaleza"), value=default_for("cole_naturaleza"), clearable=False),
+                        html.Label("Bilingüe"),
+                        dcc.Dropdown(id="cole_bilingue", options=options_for("cole_bilingue"), value=default_for("cole_bilingue"), clearable=False),
+                        html.Label("Jornada"),
+                        dcc.Dropdown(id="cole_jornada", options=options_for("cole_jornada"), value=default_for("cole_jornada"), clearable=False),
+                        html.Label("Calendario"),
+                        dcc.Dropdown(id="cole_calendario", options=options_for("cole_calendario"), value=default_for("cole_calendario"), clearable=False),
+                    ], style={"width": "48%", "display": "inline-block", "verticalAlign": "top"}),
+                    html.Div([
+                        html.Label("Área de ubicación"),
+                        dcc.Dropdown(id="cole_area", options=options_for("cole_area_ubicacion"), value=default_for("cole_area_ubicacion"), clearable=False),
+                        html.Label("Carácter"),
+                        dcc.Dropdown(id="cole_caracter", options=options_for("cole_caracter"), value=default_for("cole_caracter"), clearable=False),
+                        html.Label("Género del colegio"),
+                        dcc.Dropdown(id="cole_genero", options=options_for("cole_genero"), value=default_for("cole_genero"), clearable=False),
+                    ], style={"width": "48%", "display": "inline-block", "marginLeft": "4%", "verticalAlign": "top"}),
+                ]),
+                html.Br(),
+                html.Button("Calcular probabilidad alto desempeño colegio", id="btn-colegio", n_clicks=0),
+                dcc.Loading(type="circle", children=html.Div(id="resultado-colegio")),
+            ])
+        ]),
+        dcc.Tab(label="Modelo General", value="tab-general", children=[
+            html.Br(),
+            card([
+                html.H3("3. Predicción del puntaje global con variables generales"),
+                html.P("Este modelo estima el puntaje global usando edad, recursos tecnológicos, variables familiares y algunas características institucionales."),
+                html.Div([
+                    html.Div([
+                        html.Label("Edad de presentación"),
+                        dcc.Input(id="gen_edad", type="number", value=17, min=13, max=60, step=1, style={"width": "100%"}),
+                        html.Label("Jornada"),
+                        dcc.Dropdown(id="gen_jornada", options=options_for("cole_jornada"), value=default_for("cole_jornada"), clearable=False),
+                        html.Label("Calendario"),
+                        dcc.Dropdown(id="gen_calendario", options=options_for("cole_calendario"), value=default_for("cole_calendario"), clearable=False),
+                        html.Label("Bilingüe"),
+                        dcc.Dropdown(id="gen_bilingue", options=options_for("cole_bilingue"), value=default_for("cole_bilingue"), clearable=False),
+                        html.Label("Naturaleza"),
+                        dcc.Dropdown(id="gen_naturaleza", options=options_for("cole_naturaleza"), value=default_for("cole_naturaleza"), clearable=False),
+                    ], style={"width": "48%", "display": "inline-block", "verticalAlign": "top"}),
+                    html.Div([
+                        html.Label("Internet"),
+                        dcc.Dropdown(id="gen_internet", options=options_for("fami_tieneinternet"), value=default_for("fami_tieneinternet"), clearable=False),
+                        html.Label("Computador"),
+                        dcc.Dropdown(id="gen_computador", options=options_for("fami_tienecomputador"), value=default_for("fami_tienecomputador"), clearable=False),
+                        html.Label("Educación madre"),
+                        dcc.Dropdown(id="gen_madre", options=options_for("fami_educacionmadre"), value=default_for("fami_educacionmadre"), clearable=False),
+                        html.Label("Educación padre"),
+                        dcc.Dropdown(id="gen_padre", options=options_for("fami_educacionpadre"), value=default_for("fami_educacionpadre"), clearable=False),
+                        html.Label("Estrato"),
+                        dcc.Dropdown(id="gen_estrato", options=options_for("fami_estratovivienda"), value=default_for("fami_estratovivienda"), clearable=False),
+                        html.Label("Automóvil"),
+                        dcc.Dropdown(id="gen_auto", options=options_for("fami_tieneautomovil"), value=default_for("fami_tieneautomovil"), clearable=False),
+                    ], style={"width": "48%", "display": "inline-block", "marginLeft": "4%", "verticalAlign": "top"}),
+                ]),
+                html.Br(),
+                html.Button("Calcular puntaje estimado general", id="btn-general", n_clicks=0),
+                dcc.Loading(type="circle", children=html.Div(id="resultado-general")),
+            ])
+        ]),
+        dcc.Tab(label="Comparar modelos", value="tab-comparar", children=[
+            html.Br(),
+            card([
+                html.H2("Comparación de modelos y métricas"),
+                html.P("Compara el desempeño de los tres modelos principales usando métricas de validación. Pasa el mouse sobre las métricas para ver su significado."),
+                # Tabla de métricas
+                html.Table([
+                    html.Thead([
+                        html.Tr([
+                            html.Th("Modelo"), html.Th("Tipo"), html.Th("AUC ROC"), html.Th("Precisión"), html.Th("Recall"), html.Th("F1"), html.Th("RMSE"), html.Th("MAE"), html.Th("R²")
+                        ])
+                    ]),
+                    html.Tbody([
+                        html.Tr([
+                            html.Td("Familiar"), html.Td("Clasificación"),
+                            html.Td(html.B(f"{get_metrics_familiar().get('AUC', '-')}", style={"color": "#2ecc40"})),
+                            html.Td(get_metrics_familiar().get("Precision", "-")),
+                            html.Td(get_metrics_familiar().get("Recall", "-")),
+                            html.Td(get_metrics_familiar().get("F1", "-")),
+                            html.Td("-"), html.Td("-"), html.Td("-")
+                        ]),
+                        html.Tr([
+                            html.Td("Colegio"), html.Td("Clasificación"),
+                            html.Td(get_metrics_colegio().get("AUC", "-")),
+                            html.Td(get_metrics_colegio().get("Precision", "-")),
+                            html.Td(get_metrics_colegio().get("Recall", "-")),
+                            html.Td(get_metrics_colegio().get("F1", "-")),
+                            html.Td("-"), html.Td("-"), html.Td("-")
+                        ]),
+                        html.Tr([
+                            html.Td("General"), html.Td("Regresión"),
+                            html.Td("-"), html.Td("-"), html.Td("-"), html.Td("-"),
+                            html.Td(get_metrics_general().get("RMSE", "-")),
+                            html.Td(get_metrics_general().get("MAE", "-")),
+                            html.Td(get_metrics_general().get("R2", "-")),
+                        ]),
+                    ])
+                ], style={"width": "100%", "marginBottom": "30px", "fontSize": "16px"}),
+                html.Div([
+                    html.Div([
+                        dcc.Graph(figure=auc_r2_bar_figure()),
+                    ], style={"width": "48%", "display": "inline-block", "verticalAlign": "top"}),
+                    html.Div([
+                        dcc.Graph(figure=rmse_bar_figure()),
+                    ], style={"width": "48%", "display": "inline-block", "marginLeft": "4%", "verticalAlign": "top"}),
+                ], style={"width": "100%", "display": "flex", "flexWrap": "wrap"}),
+                html.Div([
+                    dcc.Graph(figure=radar_metrics_figure()),
+                ], style={"width": "100%", "marginTop": "30px"}),
+                html.P("* Las métricas son de validación y pueden actualizarse según los resultados más recientes.", style={"fontSize": "13px", "color": "#888"}),
+            ])
+        ])
+    ])
+])
 
 if __name__ == "__main__":
     app.run(debug=True, port=8051, host="0.0.0.0")

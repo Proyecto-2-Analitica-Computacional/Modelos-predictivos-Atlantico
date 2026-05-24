@@ -451,58 +451,162 @@ def train_cole(df):
 
 def train_general(df):
     print("\nEntrenando modelo general...")
-    data = df.copy()
-    data["punt_global"] = pd.to_numeric(data["punt_global"], errors="coerce")
-    data = data.dropna(subset=["punt_global"])
-    data = data[data["punt_global"] > 0].copy()
 
-    if "estu_fechanacimiento" in data.columns and "periodo" in data.columns:
-        data["estu_fechanacimiento"] = pd.to_datetime(data["estu_fechanacimiento"], errors="coerce", dayfirst=True)
-        data["anio_nacimiento"] = data["estu_fechanacimiento"].dt.year
-        data["anio_presentacion"] = (pd.to_numeric(data["periodo"], errors="coerce") // 10).astype("Int64")
-        data["edad_presentacion"] = data["anio_presentacion"] - data["anio_nacimiento"]
-        mask = (data["edad_presentacion"] < 13) | (data["edad_presentacion"] > 60) | data["edad_presentacion"].isna()
-        med = data.loc[~mask, "edad_presentacion"].median()
-        data.loc[mask, "edad_presentacion"] = med
-    elif "edad_presentacion" not in data.columns:
+    data = df.copy()
+
+    TARGET = "punt_global" if "punt_global" in data.columns else "puntaje_global"
+
+    # Asegurar que edad_presentacion exista
+    if "edad_presentacion" not in data.columns:
         data["edad_presentacion"] = 17
 
-    selected = ["punt_global", "edad_presentacion"] + [c for c in variables_general_categoricas if c in data.columns]
+    selected = [TARGET, "edad_presentacion"] + [
+        c for c in variables_general_categoricas
+        if c in data.columns
+    ]
+
     data = data[selected].copy()
 
+    # Limpieza EXACTA del archivo train_general_model.py
     for c in variables_general_categoricas:
         if c in data.columns:
-            data[c] = clean_text_series(data[c])
+            data[c] = (
+                data[c]
+                .astype(str)
+                .str.lower()
+                .str.strip()
+                .replace(
+                    ["", " ", "nan", "none", "null"],
+                    "sin_informacion"
+                )
+                .fillna("sin_informacion")
+            )
 
-    data = pd.get_dummies(data, columns=[c for c in variables_general_categoricas if c in data.columns], drop_first=False)
-    encoded_cols = [c for c in data.columns if c != "punt_global"]
+    # One-hot encoding
+    data = pd.get_dummies(
+        data,
+        columns=[
+            c for c in variables_general_categoricas
+            if c in data.columns
+        ],
+        drop_first=False
+    )
+
+    encoded_cols = [c for c in data.columns if c != TARGET]
+
     data[encoded_cols] = data[encoded_cols].astype(float)
 
     X = data[encoded_cols].astype("float32")
-    y = pd.to_numeric(data["punt_global"], errors="coerce").astype("float32")
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=.2, random_state=42)
+    y = pd.to_numeric(
+        data[TARGET],
+        errors="coerce"
+    ).astype("float32")
 
-    model = build_general_regressor(X_train.to_numpy())
-    early = keras.callbacks.EarlyStopping(monitor="val_loss", patience=5, restore_best_weights=True)
-    model.fit(X_train.to_numpy(), y_train, validation_split=.2, epochs=100, batch_size=32, callbacks=[early], verbose=1)
+    X_train, X_test, y_train, y_test = train_test_split(
+        X,
+        y,
+        test_size=0.2,
+        random_state=42
+    )
 
-    pred = model.predict(X_test.to_numpy(), verbose=0).ravel()
-    print("RMSE:", np.sqrt(mean_squared_error(y_test, pred)))
-    print("MAE:", mean_absolute_error(y_test, pred))
-    print("R2:", r2_score(y_test, pred))
+    # MODELO EXACTAMENTE IGUAL
+    input_shape = X_train.shape[1]
 
-    # Guardar el modelo en formato .h5 para máxima compatibilidad
-    model.save(os.path.join(MODELS_DIR, "modelo_general_regresion.h5"))
-    # Si quieres, puedes eliminar el .keras para evitar confusiones
-    keras_path = os.path.join(MODELS_DIR, "modelo_general_regresion.keras")
+    model = keras.Sequential([
+        keras.layers.Input(shape=(input_shape,)),
+        keras.layers.Dense(64, activation="relu"),
+        keras.layers.Dense(32, activation="relu"),
+        keras.layers.Dense(1)
+    ])
+
+    model.compile(
+        optimizer="adam",
+        loss="mse",
+        metrics=["mae"]
+    )
+
+    early = keras.callbacks.EarlyStopping(
+        monitor="val_loss",
+        patience=5,
+        restore_best_weights=True
+    )
+
+    model.fit(
+        X_train.to_numpy(),
+        y_train,
+        validation_split=0.2,
+        epochs=100,
+        batch_size=32,
+        callbacks=[early],
+        verbose=2
+    )
+
+    pred = model.predict(
+        X_test.to_numpy(),
+        verbose=0
+    ).ravel()
+
+    rmse = np.sqrt(mean_squared_error(y_test, pred))
+    mae = mean_absolute_error(y_test, pred)
+    r2 = r2_score(y_test, pred)
+
+    print("RMSE:", rmse)
+    print("MAE:", mae)
+    print("R2:", r2)
+
+    # Guardar modelo
+    model.save(
+        os.path.join(
+            MODELS_DIR,
+            "modelo_general_regresion.h5"
+        )
+    )
+
+    # Eliminar .keras si existe
+    keras_path = os.path.join(
+        MODELS_DIR,
+        "modelo_general_regresion.keras"
+    )
+
     if os.path.exists(keras_path):
         try:
             os.remove(keras_path)
         except Exception as e:
             print(f"[DEBUG] No se pudo eliminar el archivo .keras: {e}")
-    joblib.dump(encoded_cols, os.path.join(MODELS_DIR, "columnas_general_encoded.pkl"))
 
+    # IMPORTANTE:
+    # usar el mismo nombre que usa el dashboard
+    joblib.dump(
+        encoded_cols,
+        os.path.join(
+            MODELS_DIR,
+            "columnas_general_encoded.pkl"
+        )
+    )
+
+    # Guardar métricas
+    import json
+
+    metrics = {
+        "RMSE": round(float(rmse), 4),
+        "MAE": round(float(mae), 4),
+        "R2": round(float(r2), 4)
+    }
+
+    with open(
+        os.path.join(MODELS_DIR, "metrics_general.json"),
+        "w",
+        encoding="utf-8"
+    ) as f:
+        json.dump(
+            metrics,
+            f,
+            ensure_ascii=False,
+            indent=2
+        )
+
+        
 if __name__ == "__main__":
     import os
     # Ruta robusta: siempre busca el archivo desde la raíz del proyecto

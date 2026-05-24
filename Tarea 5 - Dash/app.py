@@ -119,26 +119,81 @@ def load_data():
     return pd.DataFrame()
 
 # Mover la función radar_metrics_figure fuera de load_data
-def auc_r2_bar_figure():
+def clasificacion_metrics_figure():
     fam = get_metrics_familiar()
     col = get_metrics_colegio()
-    gen = get_metrics_general()
-    auc_fam = float(fam.get("AUC", 0) or 0)
-    auc_col = float(col.get("AUC", 0) or 0)
-    r2_gen = float(gen.get("R2", 0) or 0)
-    modelos = ["Familiar", "Colegio", "General"]
-    valores = [auc_fam, auc_col, r2_gen]
-    fig = go.Figure([go.Bar(x=modelos, y=valores, marker_color=["#6C63FF", "#00BFAE", "#888888"])] )
-    fig.update_layout(title="AUC ROC (clasificación) y R² (regresión)", yaxis_title="AUC ROC / R²", xaxis_title="Modelo", height=350, margin=dict(l=30, r=30, t=50, b=30))
+
+    metricas = ["AUC", "Precision", "Recall", "F1"]
+
+    familiar = [
+        float(fam.get("AUC", 0) or 0),
+        float(fam.get("Precision", 0) or 0),
+        float(fam.get("Recall", 0) or 0),
+        float(fam.get("F1", 0) or 0),
+    ]
+
+    colegio = [
+        float(col.get("AUC", 0) or 0),
+        float(col.get("Precision", 0) or 0),
+        float(col.get("Recall", 0) or 0),
+        float(col.get("F1", 0) or 0),
+    ]
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Bar(
+        x=metricas,
+        y=familiar,
+        name="Familiar",
+        marker_color="#6C63FF"
+    ))
+
+    fig.add_trace(go.Bar(
+        x=metricas,
+        y=colegio,
+        name="Colegio",
+        marker_color="#00BFAE"
+    ))
+
+    fig.update_layout(
+        title="Métricas de clasificación",
+        yaxis_title="Valor",
+        xaxis_title="Métrica",
+        barmode="group",
+        height=400,
+        margin=dict(l=30, r=30, t=50, b=30)
+    )
+
     return fig
 
-def rmse_bar_figure():
+
+def regresion_metrics_figure():
     gen = get_metrics_general()
-    rmse_gen = float(gen.get("RMSE", 0) or 0)
-    modelos = ["General"]
-    valores = [rmse_gen]
-    fig = go.Figure([go.Bar(x=modelos, y=valores, marker_color=["#888888"])] )
-    fig.update_layout(title="RMSE por modelo (regresión)", yaxis_title="RMSE", xaxis_title="Modelo", height=350, margin=dict(l=30, r=30, t=50, b=30))
+
+    metricas = ["RMSE", "MAE", "R²"]
+
+    valores = [
+        float(gen.get("RMSE", 0) or 0),
+        float(gen.get("MAE", 0) or 0),
+        float(gen.get("R2", 0) or 0),
+    ]
+
+    fig = go.Figure([
+        go.Bar(
+            x=metricas,
+            y=valores,
+            marker_color=["#888888", "#AAAAAA", "#6C63FF"]
+        )
+    ])
+
+    fig.update_layout(
+        title="Métricas del modelo de regresión",
+        yaxis_title="Valor",
+        xaxis_title="Métrica",
+        height=400,
+        margin=dict(l=30, r=30, t=50, b=30)
+    )
+
     return fig
 
 def radar_metrics_figure():
@@ -569,7 +624,9 @@ def make_general_vector(values):
     encoded = pd.get_dummies(row, columns=variables_general_categoricas, drop_first=False)
     encoded["edad_presentacion"] = edad
     encoded = encoded.reindex(columns=cols_general, fill_value=0)
-    return encoded.astype(float)
+    matrix = encoded.astype(float).to_numpy(dtype="float32")
+    return align_to_model_input(matrix, modelo_general)
+
 
 def gauge_probability(prob):
     fig = go.Figure(go.Indicator(
@@ -910,10 +967,10 @@ app.layout = html.Div([
                 ], style={"width": "100%", "marginBottom": "30px", "fontSize": "16px"}),
                 html.Div([
                     html.Div([
-                        dcc.Graph(figure=auc_r2_bar_figure()),
+                        dcc.Graph(figure=clasificacion_metrics_figure()),
                     ], style={"width": "48%", "display": "inline-block", "verticalAlign": "top"}),
                     html.Div([
-                        dcc.Graph(figure=rmse_bar_figure()),
+                        dcc.Graph(figure=regresion_metrics_figure()),
                     ], style={"width": "48%", "display": "inline-block", "marginLeft": "4%", "verticalAlign": "top"}),
                 ], style={"width": "100%", "display": "flex", "flexWrap": "wrap"}),
                 html.Div([

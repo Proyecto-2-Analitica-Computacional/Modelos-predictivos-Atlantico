@@ -1,0 +1,22 @@
+artifact_path: file:C:/Users/Isabella Caputi/Documents/GitHub/MISW4201-202611-Frontend-Grupo12/Modelos-predictivos-Atlantico/mlruns/2/models/m-0d7c718c5f194889805524e30ef039f1/artifacts
+flavors:
+  python_function:
+    data: data
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.tensorflow
+    python_version: 3.11.5
+  tensorflow:
+    code: null
+    data: data
+    keras_version: 2.15.0
+    model_type: keras
+    save_format: tf
+mlflow_version: 3.11.1
+model_id: m-0d7c718c5f194889805524e30ef039f1
+model_size_bytes: 248854
+model_uuid: m-0d7c718c5f194889805524e30ef039f1
+prompts: null
+run_id: 9fc882da4ed74b07845777e807ad792c
+utc_time_created: '2026-05-23 19:25:26.116174'

@@ -1,0 +1,11 @@
+artifact_location: file:///c:/Users/maria/OneDrive - Universidad de los Andes/Universidad/Octavo
+  Semestre/Analitica/Modelos-predictivos-Atlantico/Tarea 4 - Modelamiento/mlruns_modelreg/258742023502006537/models/m-bb6ff0c375ca4e0a9dc8155cd43813cd/artifacts
+creation_timestamp: 1779730531598
+experiment_id: '258742023502006537'
+last_updated_timestamp: 1779730542931
+model_id: m-bb6ff0c375ca4e0a9dc8155cd43813cd
+model_type: null
+name: keras-model
+source_run_id: ccb641eb98d04998a767bc1eaeb1f46b
+status: 2
+status_message: null

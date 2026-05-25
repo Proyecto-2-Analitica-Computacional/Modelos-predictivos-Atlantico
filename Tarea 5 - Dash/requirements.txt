@@ -6,3 +6,12 @@ scikit-learn
 tensorflow
 joblib
 gunicorn
+seaborn
+matplotlib
+flask
+requests
+pytest
+pytest-cov
+black
+flake8
+mlflow

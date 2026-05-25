@@ -35,7 +35,9 @@ import importlib
 
 try:
     tf = importlib.import_module("tensorflow")
-except Exception:
+    print("[DEBUG] TensorFlow cargado correctamente:", tf.__version__)
+except Exception as e:
+    print("[DEBUG] Error al cargar TensorFlow:", repr(e))
     tf = None
 import re
 import unicodedata
@@ -170,26 +172,43 @@ def clasificacion_metrics_figure():
 def regresion_metrics_figure():
     gen = get_metrics_general()
 
-    metricas = ["RMSE", "MAE", "R²"]
+    rmse = float(gen.get("RMSE", 0) or 0)
+    mae = float(gen.get("MAE", 0) or 0)
+    r2 = float(gen.get("R2", 0) or 0)
 
-    valores = [
-        float(gen.get("RMSE", 0) or 0),
-        float(gen.get("MAE", 0) or 0),
-        float(gen.get("R2", 0) or 0),
+    # Normalización usando el rango del puntaje global Saber 11
+    max_score = 500
+
+    rmse_norm = rmse / max_score
+    mae_norm = mae / max_score
+
+    metricas = ["RMSE / 500", "MAE / 500", "R²"]
+
+    valores = [rmse_norm, mae_norm, r2]
+
+    textos = [
+        f"RMSE original: {rmse:.2f} puntos<br>RMSE normalizado: {rmse_norm:.3f}",
+        f"MAE original: {mae:.2f} puntos<br>MAE normalizado: {mae_norm:.3f}",
+        f"R²: {r2:.3f}<br>Proporción de variabilidad explicada",
     ]
 
     fig = go.Figure([
         go.Bar(
             x=metricas,
             y=valores,
+            text=[f"{v:.3f}" for v in valores],
+            textposition="auto",
+            hovertext=textos,
+            hoverinfo="text",
             marker_color=["#888888", "#AAAAAA", "#6C63FF"]
         )
     ])
 
     fig.update_layout(
-        title="Métricas del modelo de regresión",
-        yaxis_title="Valor",
+        title="Métricas normalizadas del modelo de regresión",
+        yaxis_title="Valor en escala comparable",
         xaxis_title="Métrica",
+        yaxis=dict(range=[0, 1]),
         height=400,
         margin=dict(l=30, r=30, t=50, b=30)
     )
@@ -971,6 +990,12 @@ app.layout = html.Div([
                     ], style={"width": "48%", "display": "inline-block", "verticalAlign": "top"}),
                     html.Div([
                         dcc.Graph(figure=regresion_metrics_figure()),
+                        html.P(
+                             "Nota: RMSE y MAE se normalizan dividiéndolos por 500, "
+                                "correspondiente al puntaje máximo posible. En RMSE y MAE, valores menores "
+                                "indican menor error; en R², valores mayores indican mayor capacidad explicativa.",
+                            style={"fontSize": "13px", "color": "#666"}
+                        ),
                     ], style={"width": "48%", "display": "inline-block", "marginLeft": "4%", "verticalAlign": "top"}),
                 ], style={"width": "100%", "display": "flex", "flexWrap": "wrap"}),
                 html.Div([

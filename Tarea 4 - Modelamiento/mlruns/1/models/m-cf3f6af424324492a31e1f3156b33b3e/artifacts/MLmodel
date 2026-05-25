@@ -1,0 +1,28 @@
+artifact_path: file:///c:/Users/maria/OneDrive - Universidad de los Andes/Universidad/Octavo
+  Semestre/Analitica/Modelos-predictivos-Atlantico/Tarea 4 - Modelamiento/mlruns/1/models/m-cf3f6af424324492a31e1f3156b33b3e/artifacts
+flavors:
+  keras:
+    data: data
+    keras_backend: tensorflow
+    keras_version: 3.14.1
+    save_exported_model: false
+  python_function:
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.keras
+    python_version: 3.11.9
+is_signature_from_type_hint: false
+mlflow_version: 3.12.0
+model_id: m-cf3f6af424324492a31e1f3156b33b3e
+model_size_bytes: 94429
+model_uuid: m-cf3f6af424324492a31e1f3156b33b3e
+prompts: null
+run_id: 60386cdb2d64452fa548fbe403258972
+signature:
+  inputs: '[{"type": "tensor", "tensor-spec": {"dtype": "float32", "shape": [-1, 48]}}]'
+  outputs: '[{"type": "tensor", "tensor-spec": {"dtype": "float32", "shape": [-1,
+    1]}}]'
+  params: null
+type_hint_from_example: false
+utc_time_created: '2026-05-25 17:20:31.876694'

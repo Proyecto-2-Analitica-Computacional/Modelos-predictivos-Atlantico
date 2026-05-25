@@ -2,11 +2,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY ["Tarea 5 - Dash/requirements.txt", "/app/requirements.txt"]
 
-COPY . .
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
-EXPOSE 8051
+COPY . /app/
 
-CMD ["python", "app.py"]
+EXPOSE 8050
+
+CMD ["python", "Tarea 5 - Dash/app.py"]

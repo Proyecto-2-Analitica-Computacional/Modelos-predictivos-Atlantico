@@ -1,0 +1,17 @@
+URL del tablero en ejecución:
+http://54.167.226.62:8050
+
+Instancia EC2:
+i-074844b5586c39dec
+
+IP pública:
+54.167.226.62
+
+IP privada:
+172.31.38.37
+
+Puerto expuesto:
+8050
+
+Fecha de verificación:
+2026-05-25
